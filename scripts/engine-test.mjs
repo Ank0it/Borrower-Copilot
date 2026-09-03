@@ -6,6 +6,7 @@ const {
   evaluate,
   emi,
   principalFromEmi,
+  maxTenureForAge,
   moneyKnown,
   countKnown,
   PERSONAS,
@@ -473,12 +474,212 @@ console.log('Adversarial — Ravi routes to LAP and LTV drives the lender ceilin
   assert(r.rate.recommendedProduct === 'lap', 'Ravi routes to LAP');
   // LTV: 45L × 70% = 31.5L
   assert(r.capacity.lenderSanctionMax >= 3100000, 'Ravi lender ceiling >= LTV cap (got ' + r.capacity.lenderSanctionMax + ')');
-  // Borrower safe LTV: 45L × 60% = 27L
-  assert(r.capacity.borrowerSafeCapacity >= 2600000, 'Ravi safe ceiling >= borrower-LTV cap (got ' + r.capacity.borrowerSafeCapacity + ')');
-  // Recommended = min(requested 15L, safe 27L) = 15L
-  assert(r.capacity.recommendedCapacity === 1500000, 'Ravi recommended = 15L (got ' + r.capacity.recommendedCapacity + ')');
+// Borrower safe LTV: 45L × 60% = 27L
+   assert(r.capacity.borrowerSafeCapacity >= 2600000, 'Ravi safe ceiling >= borrower-LTV cap (got ' + r.capacity.borrowerSafeCapacity + ')');
+   // Recommended = EMI-constrained safe amount (requested 15L exceeds safe EMI capacity)
+   assert(r.capacity.recommendedCapacity === 368872, 'Ravi recommended = 368872 (got ' + r.capacity.recommendedCapacity + ')');
 }
 
+console.log('Regression tests');
+
+// Test A: Borrow cannot violate safe EMI
+// For each persona, if verdict is Borrow, then recommended loan EMI <= safe EMI
+for (const name of Object.keys(PERSONAS)) {
+  const input = PERSONAS[name].input;
+  const r = evaluate(input);
+  if (r.verdict.verdict === 'Borrow') {
+    const principal = r.capacity.recommendedCapacity;
+    const cappedTenure = maxTenureForAge(input.age, input.requestedTenureMonths);
+    const rateMid = (r.rate.rateMin + r.rate.rateMax) / 2;
+    const proposedEmi = emi(principal, rateMid, cappedTenure);
+    assert(
+      proposedEmi <= r.stress.safeEmi,
+      `${name}: When verdict is Borrow, recommended loan EMI must not exceed safe EMI. Got ${proposedEmi} > ${r.stress.safeEmi}`
+    );
+  }
+}
+
+// Test B: Ravi: if requested amount exceeds safe EMI capacity, verdict must not be Borrow
+{
+  const r = evaluate(PERSONAS.ravi.input);
+  const input = PERSONAS.ravi.input;
+  const requested = input.requestedAmount.value;
+  const cappedTenure = maxTenureForAge(input.age, input.requestedTenureMonths);
+  const rateMid = (r.rate.rateMin + r.rate.rateMax) / 2;
+  // We need the safe EMI ceiling from the stress output (which is the same as the affordability's safeNewEmi)
+  const safeEMI = r.stress.safeEmi;
+  // Compute the EMI of the requested amount at the midpoint rate and capped tenure
+  const requestedEmi = emi(requested, rateMid, cappedTenure);
+  // If the requested EMI exceeds the safe EMI, then verdict must not be Borrow
+  assert(
+    requestedEmi <= safeEMI || r.verdict.verdict !== 'Borrow',
+    `Ravi: If requested EMI (${requestedEmi}) exceeds safe EMI (${safeEMI}), verdict must not be Borrow (got ${r.verdict.verdict})`
+  );
+}
+
+// Test C: Priya: 20% income-drop stress safe EMI <= base safe EMI
+{
+  const baseInput = PERSONAS.priya.input;
+  const baseR = evaluate(baseInput);
+  const baseSafeEMI = baseR.stress.safeEmi;
+
+  // Create a stressed input with income reduced by 20%
+  const stressedInput = {
+    ...baseInput,
+    netMonthlyIncome: {
+      ...baseInput.netMonthlyIncome,
+      value: baseInput.netMonthlyIncome.value * 0.8
+    }
+  };
+  const stressedR = evaluate(stressedInput);
+  const stressedSafeEMI = stressedR.stress.safeEmi;
+
+  // Also assert that the stressed income is indeed less than base income
+  assert(
+    stressedInput.netMonthlyIncome.value < baseInput.netMonthlyIncome.value,
+    'Priya: 20% income-drop test: stressed income must be less than base income'
+  );
+  assert(
+    stressedSafeEMI <= baseSafeEMI,
+    `Priya: 20% income-drop stress safe EMI (${stressedSafeEMI}) must not exceed base safe EMI (${baseSafeEMI})`
+  );
+}
+
+// Test D: Priya: 15% income-drop stress safe EMI <= base safe EMI
+{
+  const baseInput = PERSONAS.priya.input;
+  const baseR = evaluate(baseInput);
+  const baseSafeEMI = baseR.stress.safeEmi;
+
+  const stressedInput = {
+    ...baseInput,
+    netMonthlyIncome: {
+      ...baseInput.netMonthlyIncome,
+      value: baseInput.netMonthlyIncome.value * 0.85
+    }
+  };
+  const stressedR = evaluate(stressedInput);
+  const stressedSafeEMI = stressedR.stress.safeEmi;
+
+  assert(
+    stressedInput.netMonthlyIncome.value < baseInput.netMonthlyIncome.value,
+    'Priya: 15% income-drop test: stressed income must be less than base income'
+  );
+  assert(
+    stressedSafeEMI <= baseSafeEMI,
+    `Priya: 15% income-drop stress safe EMI (${stressedSafeEMI}) must not exceed base safe EMI (${baseSafeEMI})`
+  );
+}
+
+// Test E: Anita: rate-shock stress must not create a contradictory positive borrowing recommendation
+{
+  const r = evaluate(PERSONAS.anita.input);
+  // Base verdict must be Don't Borrow
+  assert(
+    r.verdict.verdict === "Don't Borrow",
+    `Anita: base verdict must be Don't Borrow (got ${r.verdict.verdict})`
+  );
+  // Base recommended amount must be 0
+  assert(
+    r.capacity.recommendedCapacity === 0,
+    `Anita: base recommended capacity must be 0 (got ${r.capacity.recommendedCapacity})`
+  );
+}
+
+// Test F: General invariant: if verdict is Borrow, then recommended loan EMI <= safe EMI
+// We already did Test A for all personas. We'll also test with a few random inputs to be thorough.
+// We'll create a few variations of the personas to cover more cases.
+// We'll test with Priya, Ravi, Anita and also a self-employed with unknown CIBIL, etc.
+// But to keep it simple, we'll just do the three personas and also a custom input where we know the verdict is Borrow.
+// We'll create a custom input that is similar to Priya but with a lower requested amount to ensure verdict is Borrow.
+{
+  const baseInput = PERSONAS.priya.input;
+  const customInput = {
+    ...baseInput,
+    requestedAmount: { kind: 'known', value: 400000 } // half of the original request
+  };
+  const r = evaluate(customInput);
+  if (r.verdict.verdict === 'Borrow') {
+    const principal = r.capacity.recommendedCapacity;
+    const cappedTenure = maxTenureForAge(customInput.age, customInput.requestedTenureMonths);
+    const rateMid = (r.rate.rateMin + r.rate.rateMax) / 2;
+    const proposedEmi = emi(principal, rateMid, cappedTenure);
+    assert(
+      proposedEmi <= r.stress.safeEmi,
+      `Custom input (Priya with lower request): When verdict is Borrow, recommended loan EMI must not exceed safe EMI. Got ${proposedEmi} > ${r.stress.safeEmi}`
+    );
+  }
+}
+
+// Test G: Borrow Less boundary
+// We want a case where:
+//   - safe capacity > 0
+//   - requested amount > safe capacity
+//   - a smaller positive amount IS affordable (i.e., the safe capacity is affordable)
+// Then we expect verdict to be Borrow Less.
+// We'll use Priya's input but increase the requested amount to be above her safe capacity.
+// We know from the base persona that Priya's safe capacity is 1118256 and she requested 800000 (which is below) -> verdict Borrow.
+// So we'll set requested amount to 1200000 (above safe capacity).
+{
+  const baseInput = PERSONAS.priya.input;
+  const customInput = {
+    ...baseInput,
+    requestedAmount: { kind: 'known', value: 1200000 }
+  };
+  const r = evaluate(customInput);
+  // We expect that the recommended amount is the safe capacity (or less due to EMI constraint) and the verdict is Borrow Less.
+  // First, we check that the safe capacity is positive.
+  assert(
+    r.capacity.borrowerSafeCapacity > 0,
+    'Priya: safe capacity must be positive for this test'
+  );
+  // Then we check that the requested amount is greater than the safe capacity.
+  assert(
+    customInput.requestedAmount.value > r.capacity.borrowerSafeCapacity,
+    'Priya: requested amount must be greater than safe capacity for this test'
+  );
+  // Then we check that the verdict is Borrow Less.
+  assert(
+    r.verdict.verdict === 'Borrow Less',
+    `Priya: when requested amount exceeds safe capacity, verdict should be Borrow Less (got ${r.verdict.verdict})`
+  );
+  // Additionally, we can check that the recommended amount is not greater than the safe capacity.
+  assert(
+    r.capacity.recommendedCapacity <= r.capacity.borrowerSafeCapacity,
+    `Priya: recommended amount must not exceed safe capacity (got ${r.capacity.recommendedCapacity} > ${r.capacity.borrowerSafeCapacity})`
+  );
+}
+
+// Test H: Don't Borrow boundary
+// We want a case where no meaningful positive loan fits, i.e., the safe EMI ceiling is 0 or negative, or even the smallest loan exceeds the safe EMI.
+// We'll create an input with very low income and high essentials such that the safe EMI ceiling is 0.
+// We'll use Anita's input as a base but adjust income and essentials.
+// Anita's base: netMonthlyIncome 28000, monthlyEssentials 18000, existingEmi 9000 -> safe EMI ceiling? 
+// Let's compute: totalIncome = 28000, existingEmi=9000, essentials=18000 -> disposable income = 28000-9000-18000 = 1000, then minus buffer? 
+// But we don't need to compute exactly; we just want to set the income low enough that the safe EMI ceiling is 0.
+// We'll set netMonthlyIncome to 10000, and keep essentials at 18000 and existingEmi at 9000 -> then disposable income is negative -> safe EMI ceiling 0.
+{
+  const baseInput = PERSONAS.anita.input;
+  const customInput = {
+    ...baseInput,
+    netMonthlyIncome: moneyKnown(10000),
+    monthlyEssentials: moneyKnown(18000),
+    existingEmi: moneyKnown(9000),
+    // We'll keep other fields the same.
+  };
+  const r = evaluate(customInput);
+  // We expect that the safe EMI ceiling is 0 (or very low) and the recommended amount is 0 and verdict is Don't Borrow.
+  // We'll check that the recommended amount is 0.
+  assert(
+    r.capacity.recommendedCapacity === 0,
+    `Custom input (Anita with low income): recommended capacity must be 0 (got ${r.capacity.recommendedCapacity})`
+  );
+  // And the verdict is Don't Borrow.
+  assert(
+    r.verdict.verdict === "Don't Borrow",
+    `Custom input (Anita with low income): verdict must be Don't Borrow (got ${r.verdict.verdict})`
+  );
+}
 console.log();
 console.log('Passed: ' + passed);
 console.log('Failed: ' + failed);

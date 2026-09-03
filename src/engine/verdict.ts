@@ -10,7 +10,7 @@
 // risk disclaimer.
 // ============================================================================
 import type { BorrowerInput, Verdict, VerdictOutput } from './types';
-import { emi } from './math';
+import { emi, principalFromEmi, maxTenureForAge } from './math';
 import { pct, inr as inr0 } from './money';
 import { assessAffordability } from './affordability';
 import { assessRate } from './rates';
@@ -86,8 +86,34 @@ export function assessVerdict(input: BorrowerInput): VerdictOutput {
     );
   }
 
-  // ---- "Borrow Less" triggers (mild) ----
+  // --- Compute recommended amount with EMI safety constraint ---
+  let requestedNum = 0;
+  if (input.requestedAmount.kind === 'known') {
+    requestedNum = input.requestedAmount.value;
+  }
+  let recommended = Math.min(requestedNum, aff.borrowerSafeCapacity);
+  const cappedTenure = maxTenureForAge(input.age, input.requestedTenureMonths);
+  const rateMid = (rate.rateMin + rate.rateMax) / 2;
+  // Ensure recommended loan's EMI at midpoint rate does not exceed safe EMI ceiling
+  const proposedEmi = emi(recommended, rateMid, cappedTenure);
+  if (proposedEmi > aff.safeNewEmi) {
+    // Reduce recommended to the max principal that yields EMI <= safeNewEmi
+    const maxSafePrincipal = principalFromEmi(aff.safeNewEmi, rateMid, cappedTenure);
+    if (maxSafePrincipal < recommended) {
+      recommended = maxSafePrincipal;
+    }
+  }
+  // If after constraint the recommended is zero, treat as unaffordable unless already Don't Borrow
+  if (recommended <= 0 && verdict !== "Don't Borrow") {
+    verdict = "Don't Borrow";
+    ruleId = 'R-AFFORD';
+    reasons.push(
+      `Even a minimal loan would exceed your safe EMI ceiling given current income and obligations.`,
+    );
+  }
 
+  // ---- "Borrow Less" triggers (mild) ----
+  // Note: Borrow Less triggers only apply if we haven't already set Don't Borrow
   if (verdict === 'Borrow') {
     if (input.recentBounces.kind === 'known' && input.recentBounces.value >= 1) {
       verdict = 'Borrow Less';
@@ -96,15 +122,16 @@ export function assessVerdict(input: BorrowerInput): VerdictOutput {
         `${input.recentBounces.value} recent EMI bounce(s) signal cash-flow strain — borrow a smaller amount or extend tenure.`,
       );
     }
+    // Use the final recommended amount (after EMI constraint) for the Borrow Less trigger
     if (
       input.requestedAmount.kind === 'known' &&
-      aff.recommendedCapacity > 0 &&
-      input.requestedAmount.value > aff.recommendedCapacity * 1.05
+      recommended > 0 &&
+      input.requestedAmount.value > recommended * 1.05
     ) {
       verdict = 'Borrow Less';
       ruleId = 'R-AFFORD';
       reasons.push(
-        `Your safe capacity is ₹${aff.recommendedCapacity.toLocaleString('en-IN')}, but your ask is ₹${input.requestedAmount.value.toLocaleString('en-IN')}. Borrowing the safe amount keeps the EMI inside your budget.`,
+        `Your safe borrowing amount is ₹${recommended.toLocaleString('en-IN')}, but your ask is ₹${input.requestedAmount.value.toLocaleString('en-IN')}. Borrowing the safe amount keeps the EMI inside your budget.`,
       );
     }
     if (
@@ -156,5 +183,9 @@ export function assessVerdict(input: BorrowerInput): VerdictOutput {
     reason: summary,
     reasons,
     ruleId,
+    // We don't return the recommended amount here; the caller (e.g., Outputs) should compute it again.
+    // However, to ensure consistency, we could return it, but the VerdictOutput type doesn't have it.
+    // We'll keep the existing shape and rely on the caller to compute recommended amount using the same logic.
+    // For simplicity, we will not change the return type.
   };
 }

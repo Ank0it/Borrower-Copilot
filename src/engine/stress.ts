@@ -23,13 +23,13 @@ export interface StressBreakdown {
   recommendedTenureMonths: number;
 }
 
-export function assessStress(input: BorrowerInput): StressBreakdown {
+export function assessStress(input: BorrowerInput, recommendedPrincipal: number): StressBreakdown {
   const aff = assessAffordability(input);
   const rate = assessRate(input);
   const rateMid = (rate.rateMin + rate.rateMax) / 2;
 
   const safeEmi = aff.safeNewEmi;
-  const principal = aff.recommendedCapacity;
+  const principal = recommendedPrincipal;
 
   const cappedTenure = maxTenureForAge(input.age, input.requestedTenureMonths);
   const proposedEmi = round0(emi(principal, rateMid, cappedTenure));

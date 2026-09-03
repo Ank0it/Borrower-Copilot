@@ -23,15 +23,52 @@ export * from './confidence';
 export * from './apr';
 export * from './personas';
 
+import { emi, principalFromEmi, maxTenureForAge } from './math';
 export function evaluate(input: BorrowerInput): EngineResult {
   const verdict = assessVerdict(input);
-  const rawSafe = assessAffordability(input).borrowerSafeCapacity;
-  const requested = input.requestedAmount.kind === 'known' ? input.requestedAmount.value : 0;
-  const recommendation =
-    verdict.verdict === "Don't Borrow" ? 0 : Math.min(requested, rawSafe);
-  const capacity = assessCapacity(input, recommendation);
+  const aff = assessAffordability(input);
   const rate = assessRate(input);
-  const stress = assessStress(input);
+  const rawSafe = aff.borrowerSafeCapacity;
+  const requested = input.requestedAmount.kind === 'known' ? input.requestedAmount.value : 0;
+  let recommendation = 0;
+  if (verdict.verdict !== "Don't Borrow") {
+    recommendation = Math.min(requested, rawSafe);
+    // Apply EMI safety constraint: ensure the recommended loan's EMI at midpoint rate does not exceed safe EMI ceiling
+    if (recommendation > 0) {
+      const cappedTenure = maxTenureForAge(input.age, input.requestedTenureMonths);
+      const rateMid = (rate.rateMin + rate.rateMax) / 2;
+      const proposedEmi = emi(recommendation, rateMid, cappedTenure);
+      if (proposedEmi > aff.safeNewEmi) {
+        // Reduce recommendation to the max principal that yields EMI <= safeNewEmi
+        const maxSafePrincipal = principalFromEmi(aff.safeNewEmi, rateMid, cappedTenure);
+        if (maxSafePrincipal < recommendation) {
+          recommendation = maxSafePrincipal;
+        }
+      }
+      // If after constraint the recommended is zero, treat as unaffordable
+      if (recommendation <= 0) {
+        verdict.verdict = "Don't Borrow";
+        verdict.ruleId = 'R-AFFORD';
+        // Prepend our reason so it becomes the first reason
+        verdict.reasons = [
+          `Even a minimal loan would exceed your safe EMI ceiling given current income and obligations.`,
+          ...verdict.reasons
+        ];
+        recommendation = 0;
+      }
+    }
+  }
+  // Update the reason string (summary) based on the final verdict and reasons
+  if (verdict.verdict === "Don't Borrow") {
+    verdict.reason = verdict.reasons[0];
+  } else if (verdict.verdict === 'Borrow Less') {
+    verdict.reason = `Conditional yes — but borrow less: ${verdict.reasons[0]}`;
+  } else {
+    verdict.reason = `Yes, with the following check: ${verdict.reasons[0]}`;
+  }
+
+  const capacity = assessCapacity(input, recommendation);
+  const stress = assessStress(input, recommendation);
   const confidence = assessConfidence(input);
 
   const warnings: string[] = [];
