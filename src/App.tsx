@@ -105,7 +105,7 @@ function Header({
   return (
     <header className="border-b border-slate-200 bg-white no-print">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col items-start">
           <button
             type="button"
             onClick={onReset}
@@ -113,7 +113,7 @@ function Header({
           >
             Borrower Copilot
           </button>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 mt-1">
             Privacy-first loan self-assessment · runs entirely in your browser
           </p>
         </div>
