@@ -83,6 +83,11 @@ export default function App() {
             <NegotiationCard input={input} result={result} />
           </div>
         )}
+
+        {/* Methodology line */}
+        <p className="mt-8 text-xs text-slate-500 text-center">
+          Methodology: transparent rules and assumptions documented in RULES.md.
+        </p>
       </main>
 
       <Footer />
@@ -143,7 +148,6 @@ function Footer() {
           Borrower Copilot is an educational tool, not a lender. No bureau pulls,
           no API calls, no data stored.
         </span>
-        <span>Built on R01–R09 in RULES.md.</span>
       </div>
     </footer>
   );
@@ -157,25 +161,25 @@ function Intake({
   onStartQuestionnaire: () => void;
 }) {
   return (
-    <div className="space-y-8">
-      <section>
+    <div className="space-y-6">
+      <section className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900">
-          Quick-fill a persona
+          Try a sample borrower
         </h2>
-        <p className="text-sm text-slate-600 mb-3">
-          Try one of the three test profiles from the brief.
+        <p className="text-sm text-slate-600 mb-4">
+          See how Borrower Copilot works with one of the profiles from the brief.
         </p>
         <div className="grid sm:grid-cols-3 gap-3">
           {(Object.keys(PERSONAS) as (keyof typeof PERSONAS)[]).map((k) => (
             <button
               key={k}
               onClick={() => onApplyPersona(k)}
-              className="text-left rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-400"
+              className="flex flex-col items-start rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-400"
             >
-              <div className="font-medium text-slate-900">
+              <div className="font-medium text-slate-900 mb-1">
                 {PERSONAS[k].label}
               </div>
-              <div className="text-xs text-slate-600 mt-1">
+              <div className="text-xs text-slate-600 mb-2">
                 {PERSONAS[k].description}
               </div>
             </button>
@@ -183,20 +187,80 @@ function Intake({
         </div>
       </section>
 
-      <section>
+      <div className="flex items-center gap-3 py-2" aria-hidden="true">
+        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-sm text-slate-500">OR</span>
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+
+      <section className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900">
-          Or answer 8 quick questions
+          Start with 8 essential questions
         </h2>
         <p className="text-sm text-slate-600 mb-4">
-          We only ask what changes a number. Adaptive pathing skips irrelevant
-          questions for your profile.
+          We only ask what can change your result. Additional questions appear only when they matter.
         </p>
         <button
           onClick={onStartQuestionnaire}
-          className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800"
+          className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
         >
           Start questionnaire →
         </button>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900">
+          What you'll get
+        </h2>
+
+        <div className="border border-slate-200 bg-slate-50 rounded-lg p-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-slate-900 mb-1">
+                VERDICT
+              </h3>
+              <p className="text-xs text-slate-600">
+                Borrow / Borrow Less / Don't Borrow
+              </p>
+            </div>
+
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-slate-900 mb-1">
+                SAFE AMOUNT
+              </h3>
+              <p className="text-xs text-slate-600">
+                What you can responsibly carry
+              </p>
+            </div>
+
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-slate-900 mb-1">
+                FAIR RATE
+              </h3>
+              <p className="text-xs text-slate-600">
+                Your profile-based rate range
+              </p>
+            </div>
+
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-slate-900 mb-1">
+                EMI CEILING
+              </h3>
+              <p className="text-xs text-slate-600">
+                A monthly amount you should not cross
+              </p>
+            </div>
+
+            <div className="flex flex-col">
+              <h3 className="text-sm font-medium text-slate-900 mb-1">
+                NEGOTIATION CARD
+              </h3>
+              <p className="text-xs text-slate-600">
+                A lender-ready summary to take with you
+              </p>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );
